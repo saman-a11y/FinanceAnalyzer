@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 import requests
+import io
+import zipfile
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -12,7 +14,7 @@ import plotly.express as px
 import yfinance as yf
 from streamlit_option_menu import option_menu
 
-from pipeline.download_pipeline import check_announcements, download_reports
+from pipeline.download_pipeline import check_announcements
 from utils.announcement_classifier import classify_announcement
 
 from dashboard.components.ticker import show_ticker
@@ -51,6 +53,46 @@ font-weight:bold;
 
 </style>
 """, unsafe_allow_html=True)
+
+
+# ---------------- ZIP CREATOR ----------------
+
+def create_zip(symbol, reports):
+
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+
+        for report in reports:
+
+            url = report.get("attchmntFile")
+
+            if not url:
+                continue
+
+            try:
+
+                headers = {"User-Agent": "Mozilla/5.0"}
+
+                response = requests.get(url, headers=headers, timeout=20)
+
+                if response.status_code != 200:
+                    continue
+
+                category = classify_announcement(report)
+
+                filename = url.split("/")[-1]
+
+                path = f"{symbol}/{category}/{filename}"
+
+                zip_file.writestr(path, response.content)
+
+            except:
+                continue
+
+    zip_buffer.seek(0)
+
+    return zip_buffer
 
 
 # ---------------- NSE SYMBOL LOADER ----------------
@@ -151,16 +193,12 @@ if selected == "Dashboard":
 
             selected_company = st.selectbox(
                 "Select Company",
-                matches["display"],
-                key="dashboard_company"
+                matches["display"]
             )
 
             st.session_state.symbol = selected_company.split(" — ")[0]
 
             st.success(f"Detected Symbol: {st.session_state.symbol}")
-
-        else:
-            st.warning("No matching NSE company found")
 
     if st.session_state.symbol:
 
@@ -169,20 +207,11 @@ if selected == "Dashboard":
         try:
 
             ticker = yf.Ticker(symbol)
-
             hist = ticker.history(period="1y")
 
-            if not hist.empty:
-
-                price = round(hist["Close"].iloc[-1],2)
-                high_52w = round(hist["High"].max(),2)
-                low_52w = round(hist["Low"].min(),2)
-
-            else:
-
-                price = "N/A"
-                high_52w = "N/A"
-                low_52w = "N/A"
+            price = round(hist["Close"].iloc[-1],2)
+            high_52w = round(hist["High"].max(),2)
+            low_52w = round(hist["Low"].min(),2)
 
         except:
 
@@ -190,19 +219,19 @@ if selected == "Dashboard":
             high_52w = "N/A"
             low_52w = "N/A"
 
-        col1, col2, col3 = st.columns(3)
+        col1,col2,col3 = st.columns(3)
 
-        col1.metric("Current Price", price)
-        col2.metric("52W High", high_52w)
-        col3.metric("52W Low", low_52w)
+        col1.metric("Current Price",price)
+        col2.metric("52W High",high_52w)
+        col3.metric("52W Low",low_52w)
 
         try:
 
             history = ticker.history(period="6mo")
 
-            fig = px.line(history, x=history.index, y="Close")
+            fig = px.line(history,x=history.index,y="Close")
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig,use_container_width=True)
 
         except:
             st.warning("Price chart unavailable")
@@ -228,16 +257,13 @@ if selected == "Reports":
 
             selected_company = st.selectbox(
                 "Select Company",
-                matches["display"],
-                key="reports_company"
+                matches["display"]
             )
 
             st.session_state.symbol = selected_company.split(" — ")[0]
 
-        else:
-            st.warning("No company found")
 
-    col1, col2 = st.columns(2)
+    col1,col2 = st.columns(2)
 
     with col1:
         start_date = st.date_input("Start Date")
@@ -248,10 +274,10 @@ if selected == "Reports":
 
     if st.button("Fetch Reports"):
 
-        announcements, total, filtered, financial = check_announcements(
+        announcements,total,filtered,financial = check_announcements(
             st.session_state.symbol,
-            datetime.combine(start_date, datetime.min.time()),
-            datetime.combine(end_date, datetime.min.time())
+            datetime.combine(start_date,datetime.min.time()),
+            datetime.combine(end_date,datetime.min.time())
         )
 
         st.session_state.announcements = announcements
@@ -262,11 +288,12 @@ if selected == "Reports":
 
     if len(st.session_state.announcements) > 0:
 
-        col1, col2, col3 = st.columns(3)
+        col1,col2,col3 = st.columns(3)
 
-        col1.metric("Total NSE Announcements", st.session_state.total)
-        col2.metric("Filtered Range", st.session_state.filtered)
-        col3.metric("Financial Reports", st.session_state.financial)
+        col1.metric("Total NSE Announcements",st.session_state.total)
+        col2.metric("Filtered Range",st.session_state.filtered)
+        col3.metric("Financial Reports",st.session_state.financial)
+
 
         announcements = st.session_state.announcements
 
@@ -277,12 +304,12 @@ if selected == "Reports":
             "Count": list(Counter(categories).values())
         })
 
-        fig = px.pie(chart_data, names="Category", values="Count")
+        fig = px.pie(chart_data,names="Category",values="Count")
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig,use_container_width=True)
 
 
-        # -------- CATEGORY GROUPING --------
+        # GROUP REPORTS
 
         category_groups = {}
 
@@ -290,71 +317,63 @@ if selected == "Reports":
 
             category = classify_announcement(item)
 
-            if category not in category_groups:
-                category_groups[category] = []
-
-            category_groups[category].append(item)
+            category_groups.setdefault(category,[]).append(item)
 
 
         selected_reports = []
 
         st.subheader("Select Reports")
 
-        for category, items in category_groups.items():
+        for category,items in category_groups.items():
 
-            with st.expander(category.replace("_"," ").title(), expanded=True):
+            with st.expander(category.replace("_"," ").title()):
 
-                select_all = st.checkbox(
-                    f"Select all {category}",
-                    key=f"select_{category}"
-                )
+                select_all = st.checkbox(f"Select all {category}")
 
-                for i, report in enumerate(items[:20]):
+                for report in items[:20]:
 
                     label = f"{report.get('an_dt')} — {report.get('desc')}"
 
-                    if select_all:
+                    if select_all or st.checkbox(label):
+
                         selected_reports.append(report)
-
-                    else:
-
-                        if st.checkbox(label, key=f"{category}_{i}"):
-                            selected_reports.append(report)
 
         st.session_state.selected_reports = selected_reports
 
 
-        col1, col2 = st.columns(2)
+        # DOWNLOAD SECTION
 
-        with col1:
+        st.divider()
+        st.subheader("Download Reports")
 
-            if len(selected_reports) > 0:
+        if selected_reports:
 
-                if st.button("Download Selected Reports"):
+            zip_file = create_zip(st.session_state.symbol,selected_reports)
 
-                    progress = st.progress(0)
+            st.download_button(
+                "Download Selected Reports (ZIP)",
+                data=zip_file,
+                file_name=f"{st.session_state.symbol}_reports.zip",
+                mime="application/zip"
+            )
 
-                    for i, report in enumerate(selected_reports):
 
-                        download_reports(st.session_state.symbol, [report], 1)
+        if st.button("Prepare All Reports ZIP"):
 
-                        progress.progress((i + 1) / len(selected_reports))
+            st.session_state.full_zip = create_zip(
+                st.session_state.symbol,
+                st.session_state.announcements
+            )
 
-                    st.success("Reports downloaded successfully")
 
-        with col2:
+        if "full_zip" in st.session_state:
 
-            if st.button("Download All Reports"):
-
-                progress = st.progress(0)
-
-                for i, report in enumerate(announcements):
-
-                    download_reports(st.session_state.symbol, [report], 1)
-
-                    progress.progress((i + 1) / len(announcements))
-
-                st.success("All reports downloaded")
+            st.download_button(
+                "Download All Reports (ZIP)",
+                data=st.session_state.full_zip,
+                file_name=f"{st.session_state.symbol}_all_reports.zip",
+                mime="application/zip"
+            )
 
 
 # ==================================================
@@ -365,19 +384,4 @@ if selected == "Downloads":
 
     st.title("Download Manager")
 
-    download_path = Path.home() / "Downloads" / "FinanceAnalyzer"
-
-    if download_path.exists():
-
-        files = list(download_path.rglob("*.pdf"))
-
-        recent = sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]
-
-        st.subheader("Recent Downloads")
-
-        for f in recent:
-            st.write("📄", f.name)
-
-    else:
-
-        st.info("No downloads yet.")
+    st.info("Downloads will appear in your browser's Downloads folder.")
