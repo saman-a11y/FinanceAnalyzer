@@ -1,44 +1,43 @@
 def is_financial_announcement(item):
 
     keywords = [
-        "result",
-        "financial",
-        "quarter",
-        "annual",
-        "earnings",
-        "investor presentation",
-        "presentation",
-        "concall",
-        "earnings call",
-        "transcript",
-        "analyst meet",
-        "conference call",
-        "board meeting",
+
+        # results
         "financial results",
-        "auditor",
-        "balance sheet"
+        "quarterly results",
+        "annual results",
+        "unaudited results",
+        "audited results",
+
+        # investor
+        "investor presentation",
+        "analyst meet",
+        "investor call",
+
+        # concall
+        "conference call",
+        "earnings call",
+        "concall",
+        "transcript",
+
+        # reports
+        "annual report",
+        "financial report",
+        "board meeting outcome",
+        "outcome of board meeting"
     ]
 
     text = ""
 
-    fields = [
-        "desc",
-        "attchmntText",
-        "attchmntFile",
-        "sm_name",
-        "sm_category"
-    ]
+    if item.get("desc"):
+        text += item["desc"].lower()
 
-    for field in fields:
-
-        if field in item and item[field]:
-
-            text += " " + str(item[field]).lower()
+    if item.get("attchmntText"):
+        text += " " + item["attchmntText"].lower()
 
     for keyword in keywords:
 
         if keyword in text:
-
             return True
 
     return False

@@ -1,45 +1,95 @@
+import re
+
+def normalize(text):
+
+    if not text:
+        return ""
+
+    text = text.lower()
+
+    text = re.sub(r'[^a-z0-9 ]', ' ', text)
+
+    text = re.sub(r'\s+', ' ', text)
+
+    return text
+
+
 def classify_announcement(item):
 
     text = ""
 
-    fields = [
-        "desc",
-        "attchmntText",
-        "attchmntFile",
-        "sm_name",
-        "sm_category"
+    if item.get("desc"):
+        text += " " + item["desc"]
+
+    if item.get("attchmntText"):
+        text += " " + item["attchmntText"]
+
+    if item.get("attchmntFile"):
+        text += " " + item["attchmntFile"]
+
+    text = normalize(text)
+
+
+    # ---------------- PRIORITY RULES ----------------
+
+    # 1️⃣ Transcript / Concall
+    transcript_keywords = [
+        "transcript",
+        "concall",
+        "conference call",
+        "earnings call",
+        "analyst meet transcript",
+        "investor call transcript"
     ]
 
-    for field in fields:
-
-        if field in item and item[field]:
-
-            text += " " + str(item[field]).lower()
+    if any(k in text for k in transcript_keywords):
+        return "quarterly_transcripts"
 
 
-    # Quarterly results
-    if "quarter" in text or "q1" in text or "q2" in text or "q3" in text or "q4" in text:
-        return "quarterly_results"
+    # 2️⃣ Investor presentation
+    presentation_keywords = [
+        "investor presentation",
+        "presentation",
+        "analyst presentation",
+        "earnings presentation",
+        "investor deck"
+    ]
 
-
-    # Annual results
-    if "annual result" in text or "financial year" in text or "fy" in text:
-        return "annual_results"
-
-
-    # Investor presentations
-    if "investor presentation" in text or "presentation" in text:
+    if any(k in text for k in presentation_keywords):
         return "investor_presentations"
 
 
-    # Earnings calls
-    if "concall" in text or "conference call" in text or "earnings call" in text:
-        return "concalls"
+    # 3️⃣ Annual report
+    annual_keywords = [
+        "annual report",
+        "annual financial results",
+        "financial year",
+        "fy results",
+        "audited financial results",
+        "audited results"
+    ]
+
+    if any(k in text for k in annual_keywords):
+        return "annual_reports"
 
 
-    # Transcripts
-    if "transcript" in text:
-        return "transcripts"
+    # 4️⃣ Quarterly results
+    quarterly_keywords = [
+        "quarterly results",
+        "financial results",
+        "results for the quarter",
+        "q1 results",
+        "q2 results",
+        "q3 results",
+        "q4 results",
+        "board meeting outcome",
+        "outcome of the board meeting",
+        "unaudited financial results"
+    ]
+
+    if any(k in text for k in quarterly_keywords):
+        return "quarterly_results"
 
 
+    # fallback
     return "other_financial"
