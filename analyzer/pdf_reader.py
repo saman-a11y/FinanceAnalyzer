@@ -1,20 +1,19 @@
 import pdfplumber
 
-def extract_text_from_pdf(file_path):
+def preview_pdf(pdf_path):
 
     text = ""
 
     try:
-        with pdfplumber.open(file_path) as pdf:
 
-            for page in pdf.pages:
+        with pdfplumber.open(pdf_path) as pdf:
 
+            for page in pdf.pages[:2]:
                 page_text = page.extract_text()
-
                 if page_text:
                     text += page_text
 
-    except Exception as e:
-        print("Error reading PDF:", e)
+    except:
+        return "Preview unavailable"
 
-    return text
+    return text[:1500]

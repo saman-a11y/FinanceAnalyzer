@@ -3,7 +3,9 @@ from pathlib import Path
 import requests
 import io
 import zipfile
+import tempfile
 
+# Allow importing project modules
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import streamlit as st
@@ -14,11 +16,14 @@ import plotly.express as px
 import yfinance as yf
 from streamlit_option_menu import option_menu
 
-from pipeline.download_pipeline import check_announcements
+from pipeline.download_pipeline import check_announcements, download_reports
 from utils.announcement_classifier import classify_announcement
 
 from dashboard.components.ticker import show_ticker
 from dashboard.components.orderbook import show_orderbook
+
+from analyzer.financial_extractor import extract_financial_summary, generate_ai_summary
+from analyzer.pdf_reader import preview_pdf
 
 
 st.set_page_config(
@@ -26,7 +31,6 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
-
 
 # ---------------- UI STYLE ----------------
 
@@ -53,46 +57,6 @@ font-weight:bold;
 
 </style>
 """, unsafe_allow_html=True)
-
-
-# ---------------- ZIP CREATOR ----------------
-
-def create_zip(symbol, reports):
-
-    zip_buffer = io.BytesIO()
-
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-
-        for report in reports:
-
-            url = report.get("attchmntFile")
-
-            if not url:
-                continue
-
-            try:
-
-                headers = {"User-Agent": "Mozilla/5.0"}
-
-                response = requests.get(url, headers=headers, timeout=20)
-
-                if response.status_code != 200:
-                    continue
-
-                category = classify_announcement(report)
-
-                filename = url.split("/")[-1]
-
-                path = f"{symbol}/{category}/{filename}"
-
-                zip_file.writestr(path, response.content)
-
-            except:
-                continue
-
-    zip_buffer.seek(0)
-
-    return zip_buffer
 
 
 # ---------------- NSE SYMBOL LOADER ----------------
@@ -193,12 +157,16 @@ if selected == "Dashboard":
 
             selected_company = st.selectbox(
                 "Select Company",
-                matches["display"]
+                matches["display"],
+                key="dashboard_company"
             )
 
             st.session_state.symbol = selected_company.split(" — ")[0]
 
             st.success(f"Detected Symbol: {st.session_state.symbol}")
+
+        else:
+            st.warning("No matching NSE company found")
 
     if st.session_state.symbol:
 
@@ -209,9 +177,17 @@ if selected == "Dashboard":
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period="1y")
 
-            price = round(hist["Close"].iloc[-1],2)
-            high_52w = round(hist["High"].max(),2)
-            low_52w = round(hist["Low"].min(),2)
+            if not hist.empty:
+
+                price = round(hist["Close"].iloc[-1],2)
+                high_52w = round(hist["High"].max(),2)
+                low_52w = round(hist["Low"].min(),2)
+
+            else:
+
+                price = "N/A"
+                high_52w = "N/A"
+                low_52w = "N/A"
 
         except:
 
@@ -219,19 +195,24 @@ if selected == "Dashboard":
             high_52w = "N/A"
             low_52w = "N/A"
 
-        col1,col2,col3 = st.columns(3)
+        col1, col2, col3 = st.columns(3)
 
-        col1.metric("Current Price",price)
-        col2.metric("52W High",high_52w)
-        col3.metric("52W Low",low_52w)
+        col1.metric("Current Price", price)
+        col2.metric("52W High", high_52w)
+        col3.metric("52W Low", low_52w)
 
         try:
 
             history = ticker.history(period="6mo")
 
-            fig = px.line(history,x=history.index,y="Close")
+            fig = px.line(
+                history,
+                x=history.index,
+                y="Close",
+                title=f"{st.session_state.symbol} Price Chart"
+            )
 
-            st.plotly_chart(fig,use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
         except:
             st.warning("Price chart unavailable")
@@ -257,13 +238,17 @@ if selected == "Reports":
 
             selected_company = st.selectbox(
                 "Select Company",
-                matches["display"]
+                matches["display"],
+                key="reports_company"
             )
 
             st.session_state.symbol = selected_company.split(" — ")[0]
 
+        else:
+            st.warning("No company found")
 
-    col1,col2 = st.columns(2)
+
+    col1, col2 = st.columns(2)
 
     with col1:
         start_date = st.date_input("Start Date")
@@ -274,10 +259,10 @@ if selected == "Reports":
 
     if st.button("Fetch Reports"):
 
-        announcements,total,filtered,financial = check_announcements(
+        announcements, total, filtered, financial = check_announcements(
             st.session_state.symbol,
-            datetime.combine(start_date,datetime.min.time()),
-            datetime.combine(end_date,datetime.min.time())
+            datetime.combine(start_date, datetime.min.time()),
+            datetime.combine(end_date, datetime.min.time())
         )
 
         st.session_state.announcements = announcements
@@ -288,14 +273,13 @@ if selected == "Reports":
 
     if len(st.session_state.announcements) > 0:
 
-        col1,col2,col3 = st.columns(3)
-
-        col1.metric("Total NSE Announcements",st.session_state.total)
-        col2.metric("Filtered Range",st.session_state.filtered)
-        col3.metric("Financial Reports",st.session_state.financial)
-
-
         announcements = st.session_state.announcements
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Total NSE Announcements", st.session_state.total)
+        col2.metric("Filtered Range", st.session_state.filtered)
+        col3.metric("Financial Reports", st.session_state.financial)
 
         categories = [classify_announcement(a) for a in announcements]
 
@@ -304,12 +288,11 @@ if selected == "Reports":
             "Count": list(Counter(categories).values())
         })
 
-        fig = px.pie(chart_data,names="Category",values="Count")
+        fig = px.pie(chart_data, names="Category", values="Count")
+        st.plotly_chart(fig, use_container_width=True)
 
-        st.plotly_chart(fig,use_container_width=True)
 
-
-        # GROUP REPORTS
+        # -------- CATEGORY GROUPING --------
 
         category_groups = {}
 
@@ -317,64 +300,188 @@ if selected == "Reports":
 
             category = classify_announcement(item)
 
-            category_groups.setdefault(category,[]).append(item)
+            category_groups.setdefault(category, []).append(item)
 
 
         selected_reports = []
 
         st.subheader("Select Reports")
 
-        for category,items in category_groups.items():
+        for category, items in category_groups.items():
 
-            with st.expander(category.replace("_"," ").title()):
+            with st.expander(category.replace("_"," ").title(), expanded=True):
 
-                select_all = st.checkbox(f"Select all {category}")
+                select_all = st.checkbox(
+                    f"Select all {category}",
+                    key=f"select_{category}"
+                )
 
-                for report in items[:20]:
+                for i, report in enumerate(items):
 
                     label = f"{report.get('an_dt')} — {report.get('desc')}"
 
-                    if select_all or st.checkbox(label):
+                    if select_all:
 
                         selected_reports.append(report)
+
+                    else:
+
+                        if st.checkbox(label, key=f"{category}_{i}"):
+
+                            selected_reports.append(report)
 
         st.session_state.selected_reports = selected_reports
 
 
-        # DOWNLOAD SECTION
+        # ---------- REPORT PREVIEW ----------
 
-        st.divider()
-        st.subheader("Download Reports")
+        if len(selected_reports) == 1:
 
-        if selected_reports:
+            report = selected_reports[0]
+            pdf_url = report.get("attchmntFile")
 
-            zip_file = create_zip(st.session_state.symbol,selected_reports)
+            if pdf_url:
 
-            st.download_button(
-                "Download Selected Reports (ZIP)",
-                data=zip_file,
-                file_name=f"{st.session_state.symbol}_reports.zip",
-                mime="application/zip"
-            )
+                try:
+
+                    session = requests.Session()
+
+                    headers = {
+                        "User-Agent": "Mozilla/5.0",
+                        "Accept": "application/pdf",
+                        "Referer": "https://www.nseindia.com"
+                    }
+
+                    session.get("https://www.nseindia.com", headers=headers)
+
+                    r = session.get(pdf_url, headers=headers, timeout=20)
+
+                    if r.status_code == 200:
+
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                            tmp.write(r.content)
+                            pdf_path = tmp.name
+
+                        summary = extract_financial_summary(pdf_path)
+
+                        st.subheader("📊 Financial Summary")
+
+                        col1, col2, col3 = st.columns(3)
+
+                        col1.metric("Revenue", summary.get("Revenue"))
+                        col2.metric("Profit", summary.get("Profit"))
+                        col3.metric("EPS", summary.get("EPS"))
+
+                        st.subheader("🧠 Auto Earnings Summary")
+
+                        insights = generate_ai_summary(summary)
+
+                        for i in insights:
+                            st.write("•", i)
+
+                        st.subheader("📄 Report Preview")
+
+                        preview_text = preview_pdf(pdf_path)
+
+                        st.text_area("Preview", preview_text, height=300)
+
+                except Exception as e:
+
+                    st.warning("Preview unavailable for this PDF")
 
 
-        if st.button("Prepare All Reports ZIP"):
+        # ---------- DOWNLOAD BUTTONS ----------
 
-            st.session_state.full_zip = create_zip(
-                st.session_state.symbol,
-                st.session_state.announcements
-            )
+        col1, col2, col3 = st.columns(3)
 
+        with col1:
 
-        if "full_zip" in st.session_state:
+            if len(selected_reports) > 0:
 
-            st.download_button(
-                "Download All Reports (ZIP)",
-                data=st.session_state.full_zip,
-                file_name=f"{st.session_state.symbol}_all_reports.zip",
-                mime="application/zip"
-            )
+                if st.button("Download Selected Reports"):
 
+                    progress = st.progress(0)
+
+                    for i, report in enumerate(selected_reports):
+
+                        download_reports(
+                            st.session_state.symbol,
+                            [report],
+                            1
+                        )
+
+                        progress.progress((i + 1) / len(selected_reports))
+
+                    st.success("Reports downloaded successfully")
+
+        with col2:
+
+            if st.button("Download All Reports"):
+
+                progress = st.progress(0)
+
+                for i, report in enumerate(announcements):
+
+                    download_reports(
+                        st.session_state.symbol,
+                        [report],
+                        1
+                    )
+
+                    progress.progress((i + 1) / len(announcements))
+
+                st.success("All reports downloaded")
+
+            # ZIP download
+        with col3:
+
+            if st.button("Prepare ZIP Download"):
+
+                zip_buffer = io.BytesIO()
+
+                with zipfile.ZipFile(zip_buffer, "w") as zipf:
+
+                    for report in announcements:
+
+                        pdf_url = report.get("attchmntFile")
+
+                        if pdf_url:
+
+                            try:
+
+                                session = requests.Session()
+
+                                headers = {
+                                    "User-Agent": "Mozilla/5.0",
+                                    "Referer": "https://www.nseindia.com"
+                                }
+
+                                session.get("https://www.nseindia.com", headers=headers)
+
+                                r = session.get(pdf_url, headers=headers)
+
+                                if r.status_code == 200:
+
+                                    category = classify_announcement(report)
+
+                                    filename = pdf_url.split("/")[-1]
+
+                                    zipf.writestr(
+                                        f"{category}/{filename}",
+                                        r.content
+                                    )
+
+                            except:
+                                pass
+
+                zip_buffer.seek(0)
+
+                st.download_button(
+                    label="Download ZIP File",
+                    data=zip_buffer,
+                    file_name=f"{st.session_state.symbol}_reports.zip",
+                    mime="application/zip"
+                )
 
 # ==================================================
 # DOWNLOAD MANAGER
@@ -384,4 +491,19 @@ if selected == "Downloads":
 
     st.title("Download Manager")
 
-    st.info("Downloads will appear in your browser's Downloads folder.")
+    download_path = Path.home() / "Downloads" / "FinanceAnalyzer"
+
+    if download_path.exists():
+
+        files = list(download_path.rglob("*.pdf"))
+
+        recent = sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)[:10]
+
+        st.subheader("Recent Downloads")
+
+        for f in recent:
+            st.write("📄", f.name)
+
+    else:
+
+        st.info("No downloads yet.")
