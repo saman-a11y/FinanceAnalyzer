@@ -59,7 +59,6 @@ font-weight:bold;
 def load_nse_symbols():
 
     url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
-
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
@@ -67,7 +66,6 @@ def load_nse_symbols():
         response = requests.get(url, headers=headers, timeout=10)
 
         from io import StringIO
-
         df = pd.read_csv(StringIO(response.text))
 
         df.columns = [c.strip().upper() for c in df.columns]
@@ -166,22 +164,48 @@ if selected == "Dashboard":
 
     if st.session_state.symbol:
 
-        ticker = yf.Ticker(st.session_state.symbol + ".NS")
+        symbol = st.session_state.symbol + ".NS"
 
-        info = ticker.info
+        try:
 
-        col1, col2, col3, col4 = st.columns(4)
+            ticker = yf.Ticker(symbol)
 
-        col1.metric("Current Price", info.get("currentPrice","N/A"))
-        col2.metric("Market Cap", info.get("marketCap","N/A"))
-        col3.metric("PE Ratio", info.get("trailingPE","N/A"))
-        col4.metric("52W High", info.get("fiftyTwoWeekHigh","N/A"))
+            hist = ticker.history(period="1y")
 
-        history = ticker.history(period="6mo")
+            if not hist.empty:
 
-        fig = px.line(history, x=history.index, y="Close")
+                price = round(hist["Close"].iloc[-1],2)
+                high_52w = round(hist["High"].max(),2)
+                low_52w = round(hist["Low"].min(),2)
 
-        st.plotly_chart(fig, use_container_width=True)
+            else:
+
+                price = "N/A"
+                high_52w = "N/A"
+                low_52w = "N/A"
+
+        except:
+
+            price = "N/A"
+            high_52w = "N/A"
+            low_52w = "N/A"
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Current Price", price)
+        col2.metric("52W High", high_52w)
+        col3.metric("52W Low", low_52w)
+
+        try:
+
+            history = ticker.history(period="6mo")
+
+            fig = px.line(history, x=history.index, y="Close")
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        except:
+            st.warning("Price chart unavailable")
 
         show_orderbook()
 
@@ -212,7 +236,6 @@ if selected == "Reports":
 
         else:
             st.warning("No company found")
-
 
     col1, col2 = st.columns(2)
 
@@ -258,7 +281,8 @@ if selected == "Reports":
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # ---------- GROUP BY CATEGORY ----------
+
+        # -------- CATEGORY GROUPING --------
 
         category_groups = {}
 
@@ -290,13 +314,11 @@ if selected == "Reports":
                     label = f"{report.get('an_dt')} — {report.get('desc')}"
 
                     if select_all:
-
                         selected_reports.append(report)
 
                     else:
 
                         if st.checkbox(label, key=f"{category}_{i}"):
-
                             selected_reports.append(report)
 
         st.session_state.selected_reports = selected_reports
