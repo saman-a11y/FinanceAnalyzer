@@ -2,32 +2,39 @@ import streamlit as st
 import yfinance as yf
 
 
+@st.cache_data(ttl=300)
+def get_price(symbol):
+
+    try:
+
+        data = yf.Ticker(symbol).history(period="1d")
+
+        if data.empty:
+            return None
+
+        return round(data["Close"].iloc[-1], 2)
+
+    except:
+        return None
+
+
 def show_ticker():
 
-    tickers = ["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS"]
+    tickers = [
+        ("RELIANCE.NS","RELIANCE"),
+        ("TCS.NS","TCS"),
+        ("INFY.NS","INFY"),
+        ("HDFCBANK.NS","HDFCBANK"),
+        ("ICICIBANK.NS","ICICIBANK")
+    ]
 
-    text = ""
+    cols = st.columns(len(tickers))
 
-    for t in tickers:
+    for i,(symbol,label) in enumerate(tickers):
 
-        data = yf.Ticker(t).history(period="1d")
+        price = get_price(symbol)
 
-        if not data.empty:
-
-            price = data["Close"].iloc[-1]
-            open_price = data["Open"].iloc[-1]
-
-            change = ((price-open_price)/open_price)*100
-
-            arrow = "▲" if change > 0 else "▼"
-
-            text += f"{t.replace('.NS','')} {arrow} {round(change,2)}%  |  "
-
-    st.markdown(
-        f"""
-        <marquee style="color:#00d4ff;font-weight:bold;">
-        {text}
-        </marquee>
-        """,
-        unsafe_allow_html=True
-    )
+        if price:
+            cols[i].metric(label, price)
+        else:
+            cols[i].metric(label, "—")
