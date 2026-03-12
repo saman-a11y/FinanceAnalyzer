@@ -133,6 +133,24 @@ def download_reports(symbol, announcements, limit):
         if "attchmntFile" not in item or not item["attchmntFile"]:
             continue
 
+        # -------- FILE SIZE FILTER --------
+
+        size_text = item.get("attFileSize") or item.get("fileSize")
+
+        if size_text:
+
+            try:
+
+                size_value = float(size_text.split()[0])
+
+                # skip tiny files (usually advertisements / notices)
+                if size_value < 80:
+                    continue
+
+            except:
+                pass
+
+            
         url = item["attchmntFile"]
 
         if not url.startswith("http"):
@@ -158,8 +176,9 @@ def download_reports(symbol, announcements, limit):
         if any(w in desc for w in skip_words):
             continue
 
-        date_key = item.get("an_dt", "")
-        unique_key = f"{category}_{date_key}"
+        period = detect_quarter(item)
+
+        unique_key = f"{symbol}_{category}_{period}"
 
         if unique_key in downloaded_keys:
             continue

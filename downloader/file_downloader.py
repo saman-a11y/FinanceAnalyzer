@@ -63,3 +63,33 @@ def download_file(url, folder):
         print("Error:", e)
 
         return False
+    
+from concurrent.futures import ThreadPoolExecutor
+
+def download_files_parallel(urls, headers):
+
+    results = []
+
+    def fetch(url):
+
+        try:
+            r = session.get(url, headers=headers, timeout=20)
+
+            if r.status_code == 200:
+                return url, r.content
+
+        except:
+            return None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+
+        futures = [executor.submit(fetch, u) for u in urls]
+
+        for f in futures:
+
+            res = f.result()
+
+            if res:
+                results.append(res)
+
+    return results

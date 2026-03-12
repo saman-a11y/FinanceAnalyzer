@@ -393,7 +393,6 @@ if selected == "Reports":
 
         # ---------- DOWNLOAD BUTTONS ----------
 
-
         col1, col2 = st.columns(2)
 
         # ---------- DOWNLOAD SELECTED ZIP ----------
@@ -406,42 +405,56 @@ if selected == "Reports":
 
                     zip_buffer = io.BytesIO()
 
+                    session = requests.Session()
+
+                    headers = {
+                        "User-Agent": "Mozilla/5.0",
+                        "Referer": "https://www.nseindia.com/"
+                    }
+
+                    session.get("https://www.nseindia.com", headers=headers)
+
+                    urls = []
+                    meta = []
+
+                    for report in selected_reports:
+
+                        pdf_url = report.get("attchmntFile")
+
+                        if pdf_url:
+                            urls.append(pdf_url)
+                            meta.append(report)
+
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    def fetch(url):
+                        try:
+                            r = session.get(url, headers=headers, timeout=20)
+                            if r.status_code == 200:
+                                return r.content
+                        except:
+                            return None
+
+                    contents = []
+
+                    with ThreadPoolExecutor(max_workers=5) as executor:
+                        contents = list(executor.map(fetch, urls))
+
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-                        session = requests.Session()
+                        for report, content in zip(meta, contents):
 
-                        headers = {
-                            "User-Agent": "Mozilla/5.0",
-                            "Referer": "https://www.nseindia.com/"
-                        }
-
-                        session.get("https://www.nseindia.com", headers=headers)
-
-                        for report in selected_reports:
-
-                            pdf_url = report.get("attchmntFile")
-
-                            if not pdf_url:
+                            if not content:
                                 continue
 
-                            try:
+                            category = classify_announcement(report)
+                            period = detect_quarter(report)
 
-                                r = session.get(pdf_url, headers=headers, timeout=20)
+                            filename = report["attchmntFile"].split("/")[-1]
 
-                                if r.status_code == 200:
+                            zip_path = f"{st.session_state.symbol}/{period}/{category}/{filename}"
 
-                                    category = classify_announcement(report)
-
-                                    period = detect_quarter(report)
-
-                                    filename = pdf_url.split("/")[-1]
-
-                                    zip_path = f"{st.session_state.symbol}/{period}/{category}/{filename}"
-
-                                    zipf.writestr(zip_path, r.content)
-
-                            except:
-                                pass
+                            zipf.writestr(zip_path, content)
 
                     zip_buffer.seek(0)
 
@@ -461,42 +474,56 @@ if selected == "Reports":
 
                 zip_buffer = io.BytesIO()
 
+                session = requests.Session()
+
+                headers = {
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://www.nseindia.com/"
+                }
+
+                session.get("https://www.nseindia.com", headers=headers)
+
+                urls = []
+                meta = []
+
+                for report in announcements:
+
+                    pdf_url = report.get("attchmntFile")
+
+                    if pdf_url:
+                        urls.append(pdf_url)
+                        meta.append(report)
+
+                from concurrent.futures import ThreadPoolExecutor
+
+                def fetch(url):
+                    try:
+                        r = session.get(url, headers=headers, timeout=20)
+                        if r.status_code == 200:
+                            return r.content
+                    except:
+                        return None
+
+                contents = []
+
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    contents = list(executor.map(fetch, urls))
+
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-                    session = requests.Session()
+                    for report, content in zip(meta, contents):
 
-                    headers = {
-                        "User-Agent": "Mozilla/5.0",
-                        "Referer": "https://www.nseindia.com/"
-                    }
-
-                    session.get("https://www.nseindia.com", headers=headers)
-
-                    for report in announcements:
-
-                        pdf_url = report.get("attchmntFile")
-
-                        if not pdf_url:
+                        if not content:
                             continue
 
-                        try:
+                        category = classify_announcement(report)
+                        period = detect_quarter(report)
 
-                            r = session.get(pdf_url, headers=headers, timeout=20)
+                        filename = report["attchmntFile"].split("/")[-1]
 
-                            if r.status_code == 200:
+                        zip_path = f"{st.session_state.symbol}/{period}/{category}/{filename}"
 
-                                category = classify_announcement(report)
-
-                                period = detect_quarter(report)
-
-                                filename = pdf_url.split("/")[-1]
-
-                                zip_path = f"{st.session_state.symbol}/{period}/{category}/{filename}"
-
-                                zipf.writestr(zip_path, r.content)
-
-                        except:
-                            pass
+                        zipf.writestr(zip_path, content)
 
                 zip_buffer.seek(0)
 
