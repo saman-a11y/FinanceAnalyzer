@@ -8,6 +8,7 @@ import tempfile
 # Allow importing project modules
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from pipeline.download_pipeline import detect_quarter
 import streamlit as st
 from datetime import datetime
 import pandas as pd
@@ -259,6 +260,10 @@ if selected == "Reports":
 
     if st.button("Fetch Reports"):
 
+        if not st.session_state.symbol:
+            st.warning("Please select a company first.")
+            st.stop()
+
         announcements, total, filtered, financial = check_announcements(
             st.session_state.symbol,
             datetime.combine(start_date, datetime.min.time()),
@@ -321,23 +326,19 @@ if selected == "Reports":
                     label = f"{report.get('an_dt')} — {report.get('desc')}"
 
                     if select_all:
-
                         selected_reports.append(report)
 
                     else:
-
                         if st.checkbox(label, key=f"{category}_{i}"):
-
                             selected_reports.append(report)
 
         st.session_state.selected_reports = selected_reports
-
-
-        # ---------- REPORT PREVIEW ----------
+                # ---------- REPORT PREVIEW ----------
 
         if len(selected_reports) == 1:
 
             report = selected_reports[0]
+
             pdf_url = report.get("attchmntFile")
 
             if pdf_url:
@@ -347,11 +348,12 @@ if selected == "Reports":
                     session = requests.Session()
 
                     headers = {
-                        "User-Agent": "Mozilla/5.0",
-                        "Accept": "application/pdf",
-                        "Referer": "https://www.nseindia.com"
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X)",
+                        "Referer": "https://www.nseindia.com/",
+                        "Accept": "application/pdf"
                     }
 
+                    # NSE needs cookies first
                     session.get("https://www.nseindia.com", headers=headers)
 
                     r = session.get(pdf_url, headers=headers, timeout=20)
@@ -385,101 +387,123 @@ if selected == "Reports":
 
                         st.text_area("Preview", preview_text, height=300)
 
-                except Exception as e:
+                except Exception:
 
                     st.warning("Preview unavailable for this PDF")
 
-
         # ---------- DOWNLOAD BUTTONS ----------
 
-        col1, col2, col3 = st.columns(3)
+
+        col1, col2 = st.columns(2)
+
+        # ---------- DOWNLOAD SELECTED ZIP ----------
 
         with col1:
 
             if len(selected_reports) > 0:
 
-                if st.button("Download Selected Reports"):
+                if st.button("Download Selected Reports (ZIP)"):
 
-                    progress = st.progress(0)
+                    zip_buffer = io.BytesIO()
 
-                    for i, report in enumerate(selected_reports):
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-                        download_reports(
-                            st.session_state.symbol,
-                            [report],
-                            1
-                        )
+                        session = requests.Session()
 
-                        progress.progress((i + 1) / len(selected_reports))
+                        headers = {
+                            "User-Agent": "Mozilla/5.0",
+                            "Referer": "https://www.nseindia.com/"
+                        }
 
-                    st.success("Reports downloaded successfully")
+                        session.get("https://www.nseindia.com", headers=headers)
 
-        with col2:
+                        for report in selected_reports:
 
-            if st.button("Download All Reports"):
+                            pdf_url = report.get("attchmntFile")
 
-                progress = st.progress(0)
-
-                for i, report in enumerate(announcements):
-
-                    download_reports(
-                        st.session_state.symbol,
-                        [report],
-                        1
-                    )
-
-                    progress.progress((i + 1) / len(announcements))
-
-                st.success("All reports downloaded")
-
-            # ZIP download
-        with col3:
-
-            if st.button("Prepare ZIP Download"):
-
-                zip_buffer = io.BytesIO()
-
-                with zipfile.ZipFile(zip_buffer, "w") as zipf:
-
-                    for report in announcements:
-
-                        pdf_url = report.get("attchmntFile")
-
-                        if pdf_url:
+                            if not pdf_url:
+                                continue
 
                             try:
 
-                                session = requests.Session()
-
-                                headers = {
-                                    "User-Agent": "Mozilla/5.0",
-                                    "Referer": "https://www.nseindia.com"
-                                }
-
-                                session.get("https://www.nseindia.com", headers=headers)
-
-                                r = session.get(pdf_url, headers=headers)
+                                r = session.get(pdf_url, headers=headers, timeout=20)
 
                                 if r.status_code == 200:
 
                                     category = classify_announcement(report)
 
+                                    period = detect_quarter(report)
+
                                     filename = pdf_url.split("/")[-1]
 
-                                    zipf.writestr(
-                                        f"{category}/{filename}",
-                                        r.content
-                                    )
+                                    zip_path = f"{st.session_state.symbol}/{period}/{category}/{filename}"
+
+                                    zipf.writestr(zip_path, r.content)
 
                             except:
                                 pass
 
+                    zip_buffer.seek(0)
+
+                    st.download_button(
+                        label="Download Selected ZIP",
+                        data=zip_buffer,
+                        file_name=f"{st.session_state.symbol}_selected_reports.zip",
+                        mime="application/zip"
+                    )
+
+
+        # ---------- DOWNLOAD ALL ZIP ----------
+
+        with col2:
+
+            if st.button("Download All Reports (ZIP)"):
+
+                zip_buffer = io.BytesIO()
+
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+
+                    session = requests.Session()
+
+                    headers = {
+                        "User-Agent": "Mozilla/5.0",
+                        "Referer": "https://www.nseindia.com/"
+                    }
+
+                    session.get("https://www.nseindia.com", headers=headers)
+
+                    for report in announcements:
+
+                        pdf_url = report.get("attchmntFile")
+
+                        if not pdf_url:
+                            continue
+
+                        try:
+
+                            r = session.get(pdf_url, headers=headers, timeout=20)
+
+                            if r.status_code == 200:
+
+                                category = classify_announcement(report)
+
+                                period = detect_quarter(report)
+
+                                filename = pdf_url.split("/")[-1]
+
+                                zip_path = f"{st.session_state.symbol}/{period}/{category}/{filename}"
+
+                                zipf.writestr(zip_path, r.content)
+
+                        except:
+                            pass
+
                 zip_buffer.seek(0)
 
                 st.download_button(
-                    label="Download ZIP File",
+                    label="Download All Reports ZIP",
                     data=zip_buffer,
-                    file_name=f"{st.session_state.symbol}_reports.zip",
+                    file_name=f"{st.session_state.symbol}_financial_reports.zip",
                     mime="application/zip"
                 )
 

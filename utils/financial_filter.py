@@ -2,29 +2,47 @@ def is_financial_announcement(item):
 
     keywords = [
 
-        # results
+        # quarterly results
         "financial results",
         "quarterly results",
-        "annual results",
-        "unaudited results",
-        "audited results",
+        "results for the quarter",
+        "quarter ended",
+        "unaudited financial results",
+        "audited financial results",
+        "limited review report",
 
-        # investor
+        # board meeting approvals
+        "board meeting outcome",
+        "outcome of board meeting",
+        "outcome of the board meeting",
+
+        # investor communication
         "investor presentation",
+        "corporate presentation",
+        "earnings presentation",
         "analyst meet",
+        "analyst call",
         "investor call",
+        "investor meet",
 
-        # concall
+        # concall transcripts
         "conference call",
         "earnings call",
         "concall",
+        "call transcript",
+        "conference call transcript",
+        "earnings call transcript",
         "transcript",
 
-        # reports
+        # annual reports
         "annual report",
+        "integrated annual report",
         "financial report",
-        "board meeting outcome",
-        "outcome of board meeting"
+        "annual financial statements",
+
+        # regulation filings (very common)
+        "regulation 33",
+        "regulation 30"
     ]
 
     text = ""
@@ -34,6 +52,9 @@ def is_financial_announcement(item):
 
     if item.get("attchmntText"):
         text += " " + item["attchmntText"].lower()
+
+    if item.get("attchmntFile"):
+        text += " " + item["attchmntFile"].lower()
 
     for keyword in keywords:
 

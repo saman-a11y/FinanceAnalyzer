@@ -1,6 +1,27 @@
 import requests
 from pathlib import Path
 
+# Persistent session
+session = requests.Session()
+
+headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X)",
+    "Referer": "https://www.nseindia.com/",
+    "Accept": "application/pdf",
+    "Accept-Language": "en-US,en;q=0.9"
+}
+
+# Warm up NSE session properly
+try:
+    session.get("https://www.nseindia.com", headers=headers, timeout=10)
+    session.get(
+        "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
+        headers=headers,
+        timeout=10
+    )
+except:
+    pass
+
 
 def download_file(url, folder):
 
@@ -10,19 +31,13 @@ def download_file(url, folder):
     filename = url.split("/")[-1]
     path = folder / filename
 
-    # Prevent duplicate downloads
     if path.exists():
         print("Already exists:", filename)
         return True
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X)",
-        "Referer": "https://www.nseindia.com/",
-        "Accept": "application/pdf"
-    }
-
     try:
-        response = requests.get(
+
+        response = session.get(
             url,
             headers=headers,
             stream=True,
@@ -32,7 +47,9 @@ def download_file(url, folder):
         response.raise_for_status()
 
         with open(path, "wb") as f:
+
             for chunk in response.iter_content(chunk_size=8192):
+
                 if chunk:
                     f.write(chunk)
 
