@@ -64,21 +64,7 @@ def classify_announcement(item):
     if any(k in text for k in presentation_keywords):
         return "investor_presentations"
 
-    # 3️⃣ Annual reports
-
-    annual_keywords = [
-        "annual report",
-        "integrated annual report",
-        "annual financial statements",
-        "financial year",
-        "fy results",
-        "audited financial results",
-        "audited results",
-        "regulation 34"
-    ]
-
-    if any(k in text for k in annual_keywords):
-        return "annual_reports"
+    
 
     # 4️⃣ Quarterly results
 
@@ -98,6 +84,23 @@ def classify_announcement(item):
 
     if any(k in text for k in quarterly_keywords):
         return "quarterly_results"
+    
+    # 3️⃣ Annual reports
+
+    annual_keywords = [
+        "annual report",
+        "integrated annual report",
+        "annual financial statements",
+        "financial year",
+        "fy results",
+        "audited financial results",
+        "audited results",
+        "regulation 34"
+    ]
+
+    if any(k in text for k in annual_keywords):
+        return "annual_reports"
+    
 
     # 5️⃣ Board meeting outcomes (only if financial)
 

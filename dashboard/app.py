@@ -1,9 +1,14 @@
 import sys
 from pathlib import Path
+# Add project root to Python path
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
+
 import requests
 import io
 import zipfile
 import tempfile
+from utils.pdf_quarter_reader import extract_pdf_text_first_page
 
 # Allow importing project modules
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -448,7 +453,19 @@ if selected == "Reports":
                                 continue
 
                             category = classify_announcement(report)
-                            period = detect_quarter(report)
+
+                            # -------- NEW: read PDF text for accurate quarter detection --------
+                            pdf_text = ""
+                            try:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                    tmp.write(content)
+                                    pdf_path = tmp.name
+
+                                pdf_text = extract_pdf_text_first_page(pdf_path)
+                            except:
+                                pass
+
+                            period = detect_quarter(report, pdf_text)
 
                             filename = report["attchmntFile"].split("/")[-1]
 
@@ -517,7 +534,18 @@ if selected == "Reports":
                             continue
 
                         category = classify_announcement(report)
-                        period = detect_quarter(report)
+
+                        pdf_text = ""
+                        try:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                tmp.write(content)
+                                pdf_path = tmp.name
+
+                            pdf_text = extract_pdf_text_first_page(pdf_path)
+                        except:
+                            pass
+
+                        period = detect_quarter(report, pdf_text)
 
                         filename = report["attchmntFile"].split("/")[-1]
 

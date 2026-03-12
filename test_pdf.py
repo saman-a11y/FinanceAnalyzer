@@ -1,13 +1,9 @@
-from analyzer.pdf_reader import extract_text_from_pdf
-from analyzer.financial_extractor import extract_financial_data
+from utils.pdf_quarter_reader import extract_pdf_text_first_page
 
-file_path = "data/TCS/announcements/TCS_CORPCS_09032026123653_PR_09Mar26_signed.pdf"
+pdf = "/Users/samansharma/Downloads/TCS/FY2026_Q4/quarterly_transcripts/TCS_CORPCS_16012026163741_Signed_SEIntimation.pdf"   # put one transcript pdf here
 
-text = extract_text_from_pdf(file_path)
+text = extract_pdf_text_first_page(pdf)
 
-financial_data = extract_financial_data(text)
-
-print("\nExtracted Financial Data:\n")
-
-for key, value in financial_data.items():
-    print(key, ":", value)
+print("\nTEXT LENGTH:", len(text))
+print("\nFIRST 500 CHARACTERS:\n")
+print(text[:500])
