@@ -6,3 +6,4 @@ yfinance
 streamlit-option-menu
 streamlit-autorefresh
 pdfplumber
+pymupdf
