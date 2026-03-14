@@ -48,6 +48,28 @@ def detect_quarter(item, pdf_text=None):
 
     print("QUARTER DETECTION INPUT:", text[:300])
 
+
+
+    # ---------- PRIORITY 0: FY RANGE DETECTION (FY25-26 style) ----------
+
+    fy_range_match = re.search(
+        r"(q[1-4])[^a-z0-9]{0,10}fy\s*(\d{2})\s*-\s*(\d{2})",
+        text
+    )
+
+    if fy_range_match:
+
+        q = fy_range_match.group(1).upper()
+
+        start = int(fy_range_match.group(2))
+        end = int(fy_range_match.group(3))
+
+        fy = 2000 + end
+
+        print("FY RANGE DETECTED:", q, fy)
+
+        return f"FY{fy}_{q}"
+
     # ---------- PRIORITY 1: PERIOD ENDED DETECTION ----------
 
     period_match = re.search(
