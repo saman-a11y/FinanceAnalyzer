@@ -1,4 +1,4 @@
-from scraper.announcement_scraper import get_announcements
+from scraper.exchange_scraper import get_all_announcements as get_announcements
 from downloader.file_downloader import download_file
 from utils.date_filter import filter_by_date_range
 from utils.financial_filter import is_financial_announcement
@@ -19,6 +19,8 @@ def detect_quarter(item, pdf_text=None):
     from datetime import datetime
 
     text = ""
+    if pdf_text is None:
+        pdf_text = ""
 
     # combine all possible text sources
     if item.get("desc"):
@@ -31,15 +33,54 @@ def detect_quarter(item, pdf_text=None):
         text += " " + item["attchmntFile"]
 
     if pdf_text:
+        pdf_text = pdf_text[:1500]  # hedge-fund context window
         text += " " + pdf_text
 
     # normalize text
     text = text.lower()
     text = text.replace("\n", " ")
 
-    print("TEXT FOR QUARTER DETECTION:", text[:300])
+    # remove ordinal noise
+    text = text.replace("1st", "1")
+    text = text.replace("2nd", "2")
+    text = text.replace("3rd", "3")
+    text = text.replace("4th", "4")
 
+    print("QUARTER DETECTION INPUT:", text[:300])
 
+    # ---------- PRIORITY 1: PERIOD ENDED DETECTION ----------
+
+    period_match = re.search(
+        r"(march|june|september|december)\s*(\d{1,2})?[, ]*(20\d{2})",
+        text
+    )
+
+    if period_match and ("quarter" in text or "period" in text):
+
+        month = period_match.group(1)
+        year = int(period_match.group(3))
+
+        # Financial year mapping
+        if month == "march":
+            fy = year
+            q = "Q4"
+
+        elif month == "june":
+            fy = year + 1
+            q = "Q1"
+
+        elif month == "september":
+            fy = year + 1
+            q = "Q2"
+
+        elif month == "december":
+            fy = year + 1
+            q = "Q3"
+
+        print("PERIOD ENDED DETECTED:", month, year)
+
+        return f"FY{fy}_{q}"
+    
     # -------- STRONG QUARTER DETECTOR (NEW) --------
 
     quarter_phrase = re.search(
@@ -63,6 +104,52 @@ def detect_quarter(item, pdf_text=None):
 
         return f"FY{fy}_{q}"
 
+    # ---------- PRIORITY 2: QUARTER PHRASE DETECTION ----------
+
+    quarter_phrase = re.search(
+        r"(first|second|third|fourth|1st|2nd|3rd|4th|q1|q2|q3|q4)[^\n]{0,40}?(fy|fiscal)[^\d]{0,10}(20\d{2}|\d{2})",
+        text
+    )
+
+    if quarter_phrase:
+
+        q_raw = quarter_phrase.group(1)
+        fy_raw = quarter_phrase.group(3)
+
+        # normalize quarter
+        q_map = {
+            "first": "Q1",
+            "1st": "Q1",
+            "q1": "Q1",
+            "second": "Q2",
+            "2nd": "Q2",
+            "q2": "Q2",
+            "third": "Q3",
+            "3rd": "Q3",
+            "q3": "Q3",
+            "fourth": "Q4",
+            "4th": "Q4",
+            "q4": "Q4"
+        }
+
+        q = q_map.get(q_raw.lower(), None)
+
+        if not q:
+            return None
+
+        # normalize FY
+        if len(fy_raw) == 2:
+            fy = "20" + fy_raw
+        else:
+            fy = fy_raw
+
+        print("QUARTER PHRASE DETECTED:", q, fy)
+
+        return f"FY{fy}_{q}"
+
+
+    
+
     # safety fallback
     if "ended december" not in text and "ended september" not in text:
         if item.get("desc"):
@@ -77,7 +164,7 @@ def detect_quarter(item, pdf_text=None):
     text = text.replace("rd", "")
     text = text.replace("th", "")
 
-    print("TEXT FOR QUARTER DETECTION:", text[:300])
+    print("NORMALIZED TEXT SAMPLE:", text[:300])
 
     # ---------------- STEP 0: Detect Q3 FY26 style ----------------
 
@@ -178,6 +265,41 @@ def detect_quarter(item, pdf_text=None):
 
                 return f"FY{fy}_Q{q}"
 
+
+
+
+    # ---------- PRIORITY 3: ANNOUNCEMENT WINDOW INFERENCE ----------
+
+    try:
+
+        dt = datetime.strptime(item["an_dt"], "%d-%b-%Y %H:%M:%S")
+        m = dt.month
+        y = dt.year
+
+        # NSE reporting cycles
+        fy = y if m <= 3 else y + 1
+        # Q1 results season (July–August)
+        if m in [7, 8]:
+            print("WINDOW INFERENCE: Q1 season")
+            return f"FY{fy}_Q1"
+
+        # Q2 results season (Oct–Nov)
+        if m in [10, 11]:
+            print("WINDOW INFERENCE: Q2 season")
+            return f"FY{fy}_Q2"
+
+        # Q3 results season (Jan–Feb)
+        if m in [1, 2]:
+            print("WINDOW INFERENCE: Q3 season")
+            return f"FY{fy}_Q3"
+
+        # Q4 results season (Apr–May)
+        if m in [4, 5]:
+            print("WINDOW INFERENCE: Q4 season")
+            return f"FY{fy}_Q4"
+
+    except:
+        pass
     # ---------------- STEP 3: Fallback to announcement date ----------------
 
     try:
