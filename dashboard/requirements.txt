@@ -7,3 +7,13 @@ streamlit-option-menu
 streamlit-autorefresh
 pdfplumber
 pymupdf
+
+streamlit
+pandas
+numpy
+plotly
+yfinance
+requests
+PyPDF2
+beautifulsoup4
+lxml
