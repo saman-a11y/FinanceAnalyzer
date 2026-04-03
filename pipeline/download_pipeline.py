@@ -4,6 +4,13 @@ from utils.date_filter import filter_by_date_range
 from utils.financial_filter import is_financial_announcement
 from utils.announcement_classifier import classify_announcement
 from utils.pdf_content_classifier import validate_with_pdf
+from PyPDF2 import PdfReader
+
+import hashlib
+
+def get_file_hash(file_path):
+    with open(file_path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
 
 from pathlib import Path
 import time
@@ -33,7 +40,7 @@ def detect_quarter(item, pdf_text=None):
         text += " " + item["attchmntFile"]
 
     if pdf_text:
-        pdf_text = pdf_text[:1500]  # hedge-fund context window
+        pdf_text = pdf_text[:2000]  # hedge-fund context window
         text += " " + pdf_text
 
     # normalize text
@@ -390,12 +397,48 @@ def check_announcements(symbol, start_date=None, end_date=None):
 
     for item in announcements:
 
-        if is_financial_announcement(item):
+        if item.get("attchmntFile"):
             financial_announcements.append(item)
+
+        
+
+        
 
     financial_count = len(financial_announcements)
 
     return financial_announcements, total_announcements, filtered_count, financial_count
+
+
+
+
+import re
+
+def is_real_financial_statement(text):
+
+    text = text.lower()
+
+    # ✅ Must have core financial structure
+    required_sections = [
+        "particulars",
+        "income",
+        "expenses",
+        "profit before tax",
+        "profit after tax"
+    ]
+
+    section_score = sum(1 for k in required_sections if k in text)
+
+    # ✅ Must contain MANY numbers (financial tables)
+    number_hits = len(re.findall(r"\d{2,}", text))
+
+    # ✅ Must contain ₹ / crore / cr indicators
+    money_hits = len(re.findall(r"(₹|rs|crore|cr)", text))
+
+    # 🚨 FINAL STRICT RULE
+    if section_score >= 3 and number_hits >= 20 and money_hits >= 3:
+        return True
+
+    return False
 
 
 # ---------------- DOWNLOAD REPORTS ----------------
@@ -409,7 +452,10 @@ def download_reports(symbol, announcements, limit):
 
     count = 0
     downloaded_keys = set()
-    downloaded_files = set()
+
+    # ✅ separate tracking
+    downloaded_filenames = set()
+    downloaded_hashes = set()
 
     for item in announcements[:limit]:
 
@@ -457,11 +503,36 @@ def download_reports(symbol, announcements, limit):
         downloaded_keys.add(unique_key)
 
         filename = url.split("/")[-1]
+        # ---------------- EARLY ANNOUNCEMENT FILTER (VERY IMPORTANT) ----------------
 
-        if filename in downloaded_files:
+        desc_text = (item.get("desc") or "").lower()
+        filename_lower = filename.lower()
+
+        bad_announcement_signals = [
+            "newspaper",
+            "monitoring",
+            "board meeting",
+            
+            "credit rating",
+            "trading window",
+            "certificate",
+            "regulation",
+            "closure of trading window"
+        ]
+
+        if any(k in desc_text for k in bad_announcement_signals) or \
+        any(k in filename_lower for k in bad_announcement_signals):
+
+            print("❌ EARLY ANNOUNCEMENT FILTER HIT — skipping")
+
             continue
 
-        downloaded_files.add(filename)
+
+
+        if filename in downloaded_filenames:
+            continue
+
+        downloaded_filenames.add(filename)
 
         temp_folder = base_folder / "temp"
         temp_folder.mkdir(parents=True, exist_ok=True)
@@ -475,9 +546,220 @@ def download_reports(symbol, announcements, limit):
 
                 pdf_path = temp_folder / filename
 
-                pdf_text = extract_pdf_text_first_page(pdf_path)
+                
+
+            
+
+                
+
+                # 🔥 HASH-BASED DEDUPLICATION
+                file_hash = get_file_hash(pdf_path)
+
+                if file_hash in downloaded_hashes:
+                    print("⚠️ Duplicate file detected (hash), deleting")
+
+                    try:
+                        pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
+
+                downloaded_hashes.add(file_hash)
+
+                
+                def extract_full_pdf_text(pdf_path):
+
+                    from PyPDF2 import PdfReader
+
+                    text = ""
+
+                    try:
+                        reader = PdfReader(pdf_path)
+
+                        for page in reader.pages[:5]:  # first 5 pages (fast + enough)
+                            try:
+                                text += page.extract_text() or ""
+                            except:
+                                continue
+
+                    except:
+                        return ""
+
+                    return text
+                
+                pdf_text = extract_full_pdf_text(pdf_path)
+
+
+                if not pdf_text:
+                    print("⚠️ No text extracted, deleting")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
+
+                # ❌ HARD BLOCK AUDIO FILES
+                filename_lower = filename.lower()
+                text_lower = pdf_text.lower()
+
+                if "audio" in filename_lower or "recording" in filename_lower or "audio" in text_lower:
+                    print("❌ Audio file detected, deleting")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
+
+                if not pdf_text or len(pdf_text) < 200:
+                    print("⚠️ Weak text, deleting")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
 
                 print("PDF TEXT SAMPLE:", pdf_text[:200])
+
+                from utils.document_processor import process_document
+
+                doc_info = process_document(pdf_text)
+
+                confidence = doc_info["confidence"]
+                print("CONFIDENCE:", confidence)
+
+                doc_type = doc_info["type"]
+                print("DOCUMENT TYPE:", doc_type)
+
+                # ---------------- ROUTING ----------------
+
+                if doc_type == "quarterly_results":
+                    category = "quarterly_results"
+
+                elif doc_type == "transcript":
+                    category = "transcripts"
+
+                else:
+                    print("❌ Irrelevant document, deleting")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except Exception as e:
+                        print("Cleanup error:", e)
+
+                    continue
+
+                # ---------------- TRANSCRIPT VALIDATION ----------------
+
+                if category == "transcripts":
+
+                    text_lower = pdf_text.lower()
+
+                    required = ["management", "question", "answer"]
+
+                    score = sum(1 for k in required if k in text_lower)
+
+                    if score < 2 or len(text_lower) < 1000:
+                        print("❌ Not real transcript")
+
+                        try:
+                            if pdf_path.exists():
+                                pdf_path.unlink()
+                        except:
+                            pass
+
+                        continue
+
+                # ---------------- FINAL CONFIDENCE FILTER ----------------
+
+                if doc_type == "quarterly_results" and confidence == "LOW":
+                    print("❌ Low confidence financial doc, deleting")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
+
+                # ---------------- FINAL SAFETY CHECK ----------------
+
+                text = pdf_text.lower()
+                
+                # ---------------- FAKE RESULT BLOCK (VERY IMPORTANT) ----------------
+
+                fake_result_signals = [
+                    "monitoring agency",
+                    "board meeting",
+                    "outcome of board meeting",
+                    "newspaper",
+                    "press release",
+                    "intimation",
+                    "credit rating"
+                ]
+
+                if any(k in text for k in fake_result_signals):
+                    print("❌ Fake financial doc detected")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
+                
+
+                # ❌ HARD BLOCK
+                bad_signals = [
+                    "board meeting",
+                    "outcome of board meeting",
+                    "monitoring agency",
+                    "newspaper publication",
+                    "newspaper",
+                    "credit rating",
+                    "trading window",
+                    "certificate under sebi",
+                    "regulation 74",
+                    "regulation 76"
+                ]
+
+                if any(k in text for k in bad_signals):
+                    print("❌ HARD FILTER: Not a financial report, deleting")
+
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except:
+                        pass
+
+                    continue
+
+                # ---------------- QUARTERLY RESULTS VALIDATION ----------------
+
+                if category == "quarterly_results":
+
+                    if not is_real_financial_statement(text):
+                        print("❌ Not structured financial statement, deleting")
+
+                        try:
+                            if pdf_path.exists():
+                                pdf_path.unlink()
+                        except:
+                            pass
+
+                        continue
 
                 correct_period = detect_quarter(item, pdf_text)
 
@@ -489,15 +771,6 @@ def download_reports(symbol, announcements, limit):
                 final_path = final_folder / filename
 
                 pdf_path.rename(final_path)
-
-                corrected_category = validate_with_pdf(final_path, category)
-
-                if corrected_category != category:
-
-                    new_folder = base_folder / correct_period / corrected_category
-                    new_folder.mkdir(parents=True, exist_ok=True)
-
-                    final_path.rename(new_folder / filename)
 
                 try:
                     if pdf_path.exists():
